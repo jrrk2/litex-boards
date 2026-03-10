@@ -162,24 +162,52 @@ class BaseSoC(SoCCore):
 
         # SPI Ethernet (KSZ8851SNL) ----------------------------------------------------------------
         if with_spi_eth:
-            from litex.soc.cores.spi import SPIMaster
+            from litex_boards.targets.spi_host import SPIHost
             spi_eth_pads = platform.request("spi_eth")
-            self.spi_eth = SPIMaster(spi_eth_pads, data_width=8,
-                sys_clk_freq=sys_clk_freq, spi_clk_freq=10e6)
+            self.spi_eth = SPIHost(platform, spi_eth_pads, sys_clk_freq)
+            self.bus.add_slave("spi_eth", self.spi_eth.bus,
+                SoCRegion(origin=0x80302000, size=0x2000, cached=False))
+            self.irq.add("spi_eth")
             # Ethernet reset (active-low)
             eth_rst_n = platform.request("eth_rst_n")
             self.comb += eth_rst_n.eq(1)  # De-assert reset
-            # Ethernet IRQ pin (directly exposed as GPIO for kernel driver)
-            eth_irq_n = platform.request("eth_irq_n")
-            self.spi_eth_irq = eth_irq_n
+            # Constants for BIOS SPI Ethernet driver
+            self.add_constant("SPIETH_BASE", 0x80302000)
+            self.add_constant("ETH_DYNAMIC_IP")
 
         # JTAG (external TAP) ----------------------------------------------------------------------
         # When VexRiscv SMP is built with --jtag-tap, connect to external JTAG pins.
+        # Route TCK through BUFG and add timing constraints so Vivado doesn't
+        # deprioritize JTAG routing when resource utilization is high.
+        # Note: E15 is not a clock-capable pin, so CLOCK_DEDICATED_ROUTE FALSE
+        # is set in the platform to allow general routing to the BUFG input.
         if hasattr(self, "cpu") and hasattr(self.cpu, "add_jtag"):
             from litex.soc.cores.cpu.vexriscv_smp.core import VexRiscvSMP
             if VexRiscvSMP.jtag_tap:
                 jtag_pads = platform.request("jtag")
-                self.cpu.add_jtag(jtag_pads)
+                # Insert BUFG on TCK for proper clock tree routing
+                jtag_tck_bufg = Signal()
+                self.specials += Instance("BUFG",
+                    i_I = jtag_pads.tck,
+                    o_O = jtag_tck_bufg,
+                )
+                # Connect JTAG signals (using buffered TCK)
+                self.comb += [
+                    self.cpu.jtag_tms.eq(jtag_pads.tms),
+                    self.cpu.jtag_clk.eq(jtag_tck_bufg),
+                    self.cpu.jtag_tdi.eq(jtag_pads.tdi),
+                    jtag_pads.tdo.eq(self.cpu.jtag_tdo),
+                ]
+                # Timing constraints for JTAG
+                # Period=80ns (12.5MHz = 50MHz/4): submultiple of sys_clk so
+                # Vivado treats CDC paths as synchronous with relaxed timing.
+                platform.add_platform_command(
+                    "create_clock -name jtag_tck -period 80.0 [get_ports {{jtag_tck}}]")
+                # Constrain TDO output delay to minimize launch-to-pad delay.
+                platform.add_platform_command(
+                    "set_output_delay -clock jtag_tck -max 5.0 [get_ports {{jtag_tdo}}]")
+                platform.add_platform_command(
+                    "set_output_delay -clock jtag_tck -min 0.0 [get_ports {{jtag_tdo}}]")
 
         # LEDs -------------------------------------------------------------------------------------
         if with_led_chaser:
