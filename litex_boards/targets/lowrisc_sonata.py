@@ -111,7 +111,7 @@ class BaseSoC(SoCCore):
 
                 flash_cache_size = 2**int(math.log2(flash_cache_size))
                 default_divisor = math.ceil(sys_clk_freq / (2 * 20e6)) - 1
-                spiflash_module = W25Q256JVM(Codes.READ_1_1_4)
+                spiflash_module = W25Q256JVM(Codes.READ_1_1_4_4B)
                 spiflash_pads = platform.request("spiflash4x")
                 spiflash_phy = LiteSPIPHY(
                     spiflash_pads, spiflash_module,
@@ -151,10 +151,10 @@ class BaseSoC(SoCCore):
                 self.add_constant("SPIFLASH_MODULE_NAME", spiflash_module.name)
                 self.add_constant("SPIFLASH_MODULE_TOTAL_SIZE", spiflash_module.total_size)
                 self.add_constant("SPIFLASH_MODULE_PAGE_SIZE", spiflash_module.page_size)
-                if spiflash_module.bus_width >= 4 and Codes.READ_1_1_4 in spiflash_module.supported_opcodes:
+                if spiflash_module.bus_width >= 4 and Codes.READ_1_1_4_4B in spiflash_module.supported_opcodes:
                     self.add_constant("SPIFLASH_MODULE_QUAD_CAPABLE")
             else:
-                self.add_spi_flash(mode="4x", module=W25Q256JVM(Codes.READ_1_1_4), with_master=True)
+                self.add_spi_flash(mode="4x", module=W25Q256JVM(Codes.READ_1_1_4_4B), with_master=True)
 
         # SD Card ----------------------------------------------------------------------------------
         if with_sdcard:
